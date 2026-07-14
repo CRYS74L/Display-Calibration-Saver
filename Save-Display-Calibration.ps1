@@ -1,10 +1,16 @@
 ﻿#requires -version 5.1
+[CmdletBinding()]
+param(
+    [switch]$NoRun
+)
+
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "1.0.0"
+$ScriptVersion = "1.0.1"
 
 Add-Type -AssemblyName System.Windows.Forms
 
-Add-Type @"
+if (-not ("GammaRampNative" -as [type])) {
+    Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 
@@ -30,6 +36,7 @@ public static class GammaRampNative
     );
 }
 "@
+}
 
 function Read-U32BE {
     param([byte[]]$Bytes, [int]$Offset)
@@ -47,6 +54,51 @@ function Write-U32BE {
     $Bytes[$Offset + 1] = [byte](($Value -shr 16) -band 0xFF)
     $Bytes[$Offset + 2] = [byte](($Value -shr 8) -band 0xFF)
     $Bytes[$Offset + 3] = [byte]($Value -band 0xFF)
+}
+
+function Write-BytesAtomically {
+    param(
+        [string]$Path,
+        [byte[]]$Bytes
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $directory = [IO.Path]::GetDirectoryName($fullPath)
+    $fileName = [IO.Path]::GetFileName($fullPath)
+    $operationId = [Guid]::NewGuid().ToString("N")
+    $temporaryPath = Join-Path $directory (".{0}.{1}.tmp" -f $fileName, $operationId)
+    $backupPath = Join-Path $directory (".{0}.{1}.bak" -f $fileName, $operationId)
+
+    try {
+        $stream = New-Object IO.FileStream(
+            $temporaryPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None
+        )
+        try {
+            $stream.Write($Bytes, 0, $Bytes.Length)
+            $stream.Flush($true)
+        }
+        finally {
+            $stream.Dispose()
+        }
+
+        if ([IO.File]::Exists($fullPath)) {
+            [IO.File]::Replace($temporaryPath, $fullPath, $backupPath)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $fullPath)
+        }
+    }
+    finally {
+        if ([IO.File]::Exists($temporaryPath)) {
+            [IO.File]::Delete($temporaryPath)
+        }
+        if ([IO.File]::Exists($backupPath)) {
+            [IO.File]::Delete($backupPath)
+        }
+    }
 }
 
 
@@ -91,15 +143,20 @@ function Update-IccProfileId {
 
 function Select-IccFile {
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Title = "Select the source ICC/ICM profile"
-    $dialog.Filter = "ICC/ICM profiles (*.icc;*.icm)|*.icc;*.icm|All files (*.*)|*.*"
-    $dialog.Multiselect = $false
+    try {
+        $dialog.Title = "Select the source ICC/ICM profile"
+        $dialog.Filter = "ICC/ICM profiles (*.icc;*.icm)|*.icc;*.icm|All files (*.*)|*.*"
+        $dialog.Multiselect = $false
 
-    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-        throw "No source profile was selected."
+        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            throw "No source profile was selected."
+        }
+
+        return $dialog.FileName
     }
-
-    return $dialog.FileName
+    finally {
+        $dialog.Dispose()
+    }
 }
 
 function Select-Display {
@@ -138,31 +195,31 @@ function Get-OutputPath {
     $stem = [IO.Path]::GetFileNameWithoutExtension($SourcePath)
     $defaultName = "{0}-captured.icm" -f $stem
 
-    Write-Host ""
-    $name = Read-Host "Output file name [$defaultName]"
-    if ([string]::IsNullOrWhiteSpace($name)) {
-        $name = $defaultName
-    }
+    $dialog = New-Object System.Windows.Forms.SaveFileDialog
+    try {
+        $dialog.Title = "Save the captured ICC/ICM profile"
+        $dialog.Filter = "ICM profile (*.icm)|*.icm|ICC profile (*.icc)|*.icc"
+        $dialog.DefaultExt = "icm"
+        $dialog.AddExtension = $true
+        $dialog.OverwritePrompt = $true
+        $dialog.RestoreDirectory = $true
+        $dialog.InitialDirectory = $directory
+        $dialog.FileName = $defaultName
 
-    $name = [IO.Path]::GetFileName($name.Trim())
-    $extension = [IO.Path]::GetExtension($name)
-    if ($extension -notin @(".icc", ".icm")) {
-        $name += ".icm"
-    }
-
-    $outputPath = Join-Path $directory $name
-    if ([IO.Path]::GetFullPath($outputPath) -eq [IO.Path]::GetFullPath($SourcePath)) {
-        throw "The output path must be different from the source profile."
-    }
-
-    if (Test-Path -LiteralPath $outputPath) {
-        $overwrite = Read-Host "The output file already exists. Overwrite it? [y/N]"
-        if ($overwrite -notmatch '^(?i:y|yes)$') {
-            throw "Capture cancelled because the output file already exists."
+        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            throw "No output profile was selected."
         }
-    }
 
-    return $outputPath
+        $outputPath = [IO.Path]::GetFullPath($dialog.FileName)
+        if ($outputPath -eq [IO.Path]::GetFullPath($SourcePath)) {
+            throw "The output path must be different from the source profile."
+        }
+
+        return $outputPath
+    }
+    finally {
+        $dialog.Dispose()
+    }
 }
 
 function Get-CountdownSeconds {
@@ -196,9 +253,10 @@ function Capture-GammaRamp {
     }
 
     $size = 3 * 256 * 2
-    $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+    $buffer = [IntPtr]::Zero
 
     try {
+        $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
         if (-not [GammaRampNative]::GetDeviceGammaRamp($hdc, $buffer)) {
             throw "The graphics driver did not return the active gamma ramp."
         }
@@ -214,7 +272,9 @@ function Capture-GammaRamp {
         return $ramp
     }
     finally {
-        [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)
+        if ($buffer -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)
+        }
         [void][GammaRampNative]::DeleteDC($hdc)
     }
 }
@@ -254,6 +314,24 @@ function Build-VcgtTag16 {
     return $tag
 }
 
+function Test-IdentityGammaRamp {
+    param([UInt16[]]$Ramp)
+
+    if ($Ramp.Length -ne 768) {
+        throw "Unexpected gamma-ramp length."
+    }
+
+    foreach ($channelOffset in @(0, 256, 512)) {
+        for ($i = 0; $i -lt 256; $i++) {
+            if ($Ramp[$channelOffset + $i] -ne [uint16]($i * 257)) {
+                return $false
+            }
+        }
+    }
+
+    return $true
+}
+
 function Patch-IccWithCapturedRamp {
     param(
         [string]$SourcePath,
@@ -279,6 +357,9 @@ function Patch-IccWithCapturedRamp {
     if ($declaredSize -lt 132) {
         throw "The ICC header declares an implausibly small profile size."
     }
+    if ($declaredSize -ne $source.Length) {
+        throw "The ICC header size does not match the actual file length."
+    }
 
     $tagCount = Read-U32BE -Bytes $source -Offset 128
     if ($tagCount -gt 4096) {
@@ -286,18 +367,19 @@ function Patch-IccWithCapturedRamp {
     }
 
     $tagTableEnd = 132 + ([uint64]$tagCount * 12)
-    if ($tagTableEnd -gt $source.Length) {
+    if ($tagTableEnd -gt $declaredSize) {
         throw "The ICC tag table extends beyond the file boundary."
     }
 
     $vcgtEntryOffset = -1
+    $vcgtEntryCount = 0
     $vcgtOffset = 0
     $vcgtSize = 0
     [uint64]$maxOtherEnd = 0
 
     for ($i = 0; $i -lt $tagCount; $i++) {
         $entry = 132 + ($i * 12)
-        if ($entry + 12 -gt $source.Length) {
+        if ($entry + 12 -gt $declaredSize) {
             throw "The ICC tag table is truncated."
         }
 
@@ -312,11 +394,15 @@ function Patch-IccWithCapturedRamp {
         if (($offset % 4) -ne 0) {
             throw "ICC tag '$signature' is not aligned to a 4-byte boundary."
         }
-        if ($tagEnd -gt $source.Length) {
+        if ($tagEnd -gt $declaredSize) {
             throw "ICC tag '$signature' extends beyond the file boundary."
         }
 
         if ($signature -eq "vcgt") {
+            $vcgtEntryCount++
+            if ($vcgtEntryCount -gt 1) {
+                throw "The source profile contains multiple vcgt tag entries."
+            }
             $vcgtEntryOffset = $entry
             $vcgtOffset = $offset
             $vcgtSize = $size
@@ -331,7 +417,10 @@ function Patch-IccWithCapturedRamp {
     if ($vcgtEntryOffset -lt 0) {
         throw "The source profile does not contain a vcgt tag."
     }
-    if (([uint64]$vcgtOffset + [uint64]$vcgtSize) -gt $source.Length) {
+    if ($vcgtSize -lt 4) {
+        throw "The source vcgt tag is too small to contain a type signature."
+    }
+    if (([uint64]$vcgtOffset + [uint64]$vcgtSize) -gt $declaredSize) {
         throw "The source vcgt tag extends beyond the file boundary."
     }
     $vcgtType = [Text.Encoding]::ASCII.GetString($source, $vcgtOffset, 4)
@@ -354,7 +443,11 @@ function Patch-IccWithCapturedRamp {
     Write-U32BE -Bytes $result -Offset ($vcgtEntryOffset + 8) -Value $newVcgt.Length
     Update-IccProfileId -ProfileBytes $result
 
-    [IO.File]::WriteAllBytes($OutputPath, $result)
+    Write-BytesAtomically -Path $OutputPath -Bytes $result
+}
+
+if ($NoRun) {
+    return
 }
 
 try {
@@ -386,6 +479,16 @@ try {
     }
 
     $ramp = Capture-GammaRamp -DeviceName $deviceName
+    if (Test-IdentityGammaRamp -Ramp $ramp) {
+        Write-Host ""
+        Write-Host "Warning: the captured gamma ramp is a linear identity curve." -ForegroundColor Yellow
+        Write-Host "Saving it may remove calibration instead of preserving an adjusted preview." -ForegroundColor Yellow
+        $continue = Read-Host "Save the identity curve anyway? [y/N]"
+        if ($continue -notmatch '^(?i:y|yes)$') {
+            throw "Capture cancelled because the active gamma ramp is an identity curve."
+        }
+    }
+
     Patch-IccWithCapturedRamp `
         -SourcePath $sourcePath `
         -OutputPath $outputPath `

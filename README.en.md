@@ -15,7 +15,7 @@ Display Calibration Saver is designed for the awkward case where calibration sof
 
 ## Quick start
 
-1. Download and extract the latest release ZIP.
+1. Download and extract the latest release ZIP from [Releases](https://github.com/CRYS74L/Display-Calibration-Saver/releases/latest).
 2. Double-click `Run.cmd`.
 3. Select a source ICC/ICM profile that already contains a `vcgt` tag.
 4. Choose an output name, display, and countdown duration.
@@ -46,8 +46,9 @@ new vcgt table containing the captured curve
 - Captures the active calibration curve from a selected Windows display
 - Preserves the source profile and creates a separate output file
 - Stores 256 entries per RGB channel at 16-bit precision
-- Supports custom output names and countdown durations
-- Validates ICC signatures, tag tables, offsets, alignment, and file boundaries
+- Supports custom output names, save locations, and countdown durations
+- Strictly validates ICC declared length, tag tables, duplicate `vcgt` entries, offsets, alignment, and file boundaries
+- Writes through a same-directory temporary file so a failed save does not damage an existing output
 - Handles ICC v2 reserved header bytes and recalculates ICC v4 Profile IDs
 - Runs with built-in Windows PowerShell 5.1
 - Requires no installation, administrator privileges, telemetry, or network access
@@ -58,6 +59,7 @@ new vcgt table containing the captured curve
 - Windows PowerShell 5.1 or later
 - A source ICC/ICM profile containing a `vcgt` tag
 - A calibration application that applies its preview through the Windows per-display gamma ramp
+- A graphics driver that supports reading a downloadable hardware gamma ramp
 
 ## Compatibility
 
@@ -66,6 +68,8 @@ The project is not tied to a particular vendor. It can work with any application
 A confirmed use case is Datacolor SpyderTune: when the preview is correct but its adjusted profile cannot be saved, Display Calibration Saver can preserve the previewed result.
 
 Other calibration tools and profile loaders may also work. The easiest practical test is whether the adjustment changes the whole desktop on the selected display rather than only one application window.
+
+The utility uses the Windows GDI `GetDeviceGammaRamp` API. Support depends on the graphics driver and display path; it does not cover every device, HDR mode, or Advanced Color scenario, and another application or system event may replace the active curve at any time.
 
 ## What it cannot capture
 
@@ -87,7 +91,8 @@ The generated profile keeps the source profile's characterization data. Only the
 ## Important limitations
 
 - The source profile must already contain a `vcgt` tag.
-- In version 1.0, `vcgt` must be the final profile data block so it can be expanded without relocating unrelated tags.
+- In the current version, `vcgt` must be the final profile data block so it can be expanded without relocating unrelated tags.
+- The profile length declared in the ICC header must match the actual file length, and the profile may contain only one `vcgt` tag entry.
 - Capturing a calibration curve does not create a new measurement-based characterization of the display.
 - The generated profile remains valid only for the display state and hardware settings used by the source profile.
 - The tool cannot verify visual accuracy without a measuring instrument.
@@ -95,6 +100,8 @@ The generated profile keeps the source profile's characterization data. Only the
 ## Troubleshooting
 
 Common failure cases, multi-monitor notes, HDR limitations, and profile-format errors are covered in [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+If the captured result is an exact linear identity gamma ramp, the utility warns before writing and asks for confirmation. This usually means the preview was not active or the wrong display was selected.
 
 ## Privacy and security
 

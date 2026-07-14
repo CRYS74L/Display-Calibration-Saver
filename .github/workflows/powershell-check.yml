@@ -3,6 +3,7 @@ name: PowerShell validation
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -19,17 +20,24 @@ jobs:
       - name: Parse PowerShell source
         shell: powershell
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path '.\Save-Display-Calibration.ps1'),
-            [ref]$tokens,
-            [ref]$errors
-          )
-          if ($errors.Count -gt 0) {
-            $errors | Format-List * -Force
-            throw "PowerShell syntax validation failed."
+          $scripts = Get-ChildItem -Recurse -File -Filter '*.ps1'
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $script.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | Format-List * -Force
+              throw "PowerShell syntax validation failed for $($script.FullName)."
+            }
           }
+
+      - name: Run regression tests
+        shell: powershell
+        run: .\tests\Run-Tests.ps1
 
       - name: Verify launcher target
         shell: powershell
@@ -39,23 +47,46 @@ jobs:
             throw "Run.cmd does not launch the expected script."
           }
 
-      - name: Check release package contents
+      - name: Build and verify release packages
         shell: powershell
         run: |
-          $archive = '.\dist\Display-Calibration-Saver-v1.0.0.zip'
-          if (-not (Test-Path $archive)) {
-            throw "Release package is missing."
-          }
+          $version = '1.0.1'
+          $trackedArchive = ".\dist\Display-Calibration-Saver-v$version.zip"
+          $builtArchive = .\tools\Build-Release.ps1 -Version $version -OutputDirectory $env:RUNNER_TEMP
+          $expected = @('Run.cmd', 'Save-Display-Calibration.ps1', 'LICENSE', 'README.md', 'README.en.md')
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive))
-          try {
-            $names = $zip.Entries.FullName
-            foreach ($required in @('Run.cmd', 'Save-Display-Calibration.ps1', 'LICENSE', 'README.md', 'README.zh-CN.md')) {
-              if ($required -notin $names) {
-                throw "Release package is missing $required."
+
+          foreach ($archive in @($trackedArchive, $builtArchive)) {
+            if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+              throw "Release package is missing: $archive"
+            }
+
+            $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $archive))
+            try {
+              $names = @($zip.Entries.FullName)
+              if (Compare-Object $expected $names) {
+                throw "Release package contents differ from the expected file list: $archive"
+              }
+
+              foreach ($relativePath in $expected) {
+                $entry = $zip.GetEntry($relativePath)
+                $stream = $entry.Open()
+                $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8, $true)
+                try {
+                  $archiveText = $reader.ReadToEnd() -replace "`r`n", "`n"
+                }
+                finally {
+                  $reader.Dispose()
+                  $stream.Dispose()
+                }
+
+                $sourceText = (Get-Content -Raw -Encoding UTF8 -LiteralPath $relativePath) -replace "`r`n", "`n"
+                if ($archiveText -cne $sourceText) {
+                  throw "Release entry does not match the repository source: $relativePath in $archive"
+                }
               }
             }
-          }
-          finally {
-            $zip.Dispose()
+            finally {
+              $zip.Dispose()
+            }
           }
