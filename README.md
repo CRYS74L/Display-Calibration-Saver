@@ -5,111 +5,104 @@
 [![Validation](https://github.com/CRYS74L/Display-Calibration-Saver/actions/workflows/powershell-check.yml/badge.svg)](https://github.com/CRYS74L/Display-Calibration-Saver/actions/workflows/powershell-check.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**English** · [简体中文](README.zh-CN.md)
+**简体中文** · [English](README.en.md)
 
-Save the display-calibration preview currently active on Windows as a reusable ICC/ICM profile.
+把 Windows 当前正在生效的显示校色预览保存为可重复使用的 ICC/ICM 配置文件。
 
-Display Calibration Saver is designed for the awkward case where calibration software can preview the exact white-point, tint, brightness, or tone adjustment you need, but cannot save that adjusted state. The utility captures the calibration curve that is actually active on the selected display and embeds it into a copy of an existing profile.
+Display Calibration Saver 专门解决这一类问题：校色软件能够正确预览需要的色温、色调、亮度或阶调调整，但无法把调整后的状态保存下来。工具会读取指定显示器当前真正生效的校准曲线，并把它写入一个基础配置文件的副本。
 
-> The calibration application performs the color calculation. Display Calibration Saver preserves the result; it does not estimate slider values or imitate a vendor algorithm.
+> 颜色如何计算仍由原校色软件负责。Display Calibration Saver 只保存最终结果，不猜测滑杆数值，也不模仿厂商算法。
 
-## Quick start
+## 快速使用
 
-1. Download and extract the latest release ZIP.
-2. Double-click `Run.cmd`.
-3. Select a source ICC/ICM profile that already contains a `vcgt` tag.
-4. Choose an output name, display, and countdown duration.
-5. Start the countdown and switch to your calibration application.
-6. Enable the preview you want to keep and leave it active.
-7. When the countdown ends, install and apply the generated profile.
+1. 下载并解压最新发布包。
+2. 双击 `Run.cmd`。
+3. 选择一个已经含有 `vcgt` 标签的基础 ICC/ICM 文件。
+4. 设置输出文件名、目标显示器和倒计时时间。
+5. 开始倒计时后切换到校色软件。
+6. 开启并保持需要保存的预览效果。
+7. 倒计时结束后，安装并应用生成的新配置文件。
 
-The source profile is never overwritten unless you deliberately choose an existing output file and confirm replacement.
+除非你主动选择已存在的输出文件并确认覆盖，否则工具不会修改原始配置文件。
 
-## Why this exists
+## 为什么需要这个工具
 
-Many calibration tools temporarily apply preview adjustments to the Windows per-display gamma ramp before saving. If their save step fails, the desired display state may still be active in memory. This project turns that temporary state into a reusable profile.
-
-The workflow is intentionally narrow:
+不少校色软件会先把预览调整临时写入 Windows 对应显示器的 Gamma Ramp，再执行保存操作。即使保存失败，想要的显示状态仍可能已经存在于显卡当前的校准表中。这个工具会把这种临时状态固定成可以重复加载的配置文件。
 
 ```text
-compatible calibration preview
+兼容软件的校色预览
         ↓
-active per-display calibration curve
+当前显示器实际生效的校准曲线
         ↓
-copy of the selected ICC/ICM profile
+所选 ICC/ICM 的副本
         ↓
-new vcgt table containing the captured curve
+写入捕获曲线的新 vcgt 标签
 ```
 
-## Features
+## 功能
 
-- Captures the active calibration curve from a selected Windows display
-- Preserves the source profile and creates a separate output file
-- Stores 256 entries per RGB channel at 16-bit precision
-- Supports custom output names and countdown durations
-- Validates ICC signatures, tag tables, offsets, alignment, and file boundaries
-- Handles ICC v2 reserved header bytes and recalculates ICC v4 Profile IDs
-- Runs with built-in Windows PowerShell 5.1
-- Requires no installation, administrator privileges, telemetry, or network access
+- 捕获指定 Windows 显示器当前生效的校准曲线
+- 保留基础配置文件并单独生成输出文件
+- 每个 RGB 通道保存 256 个节点，精度为 16-bit
+- 支持自定义输出文件名和倒计时时间
+- 检查 ICC 签名、标签表、偏移、对齐和文件边界
+- 正确处理 ICC v2 保留字段，并为 ICC v4 重新计算 Profile ID
+- 只依赖 Windows 自带的 PowerShell 5.1
+- 不需要安装、不需要管理员权限、不联网、不收集数据
 
-## Requirements
+## 使用条件
 
-- Windows 10 or Windows 11
-- Windows PowerShell 5.1 or later
-- A source ICC/ICM profile containing a `vcgt` tag
-- A calibration application that applies its preview through the Windows per-display gamma ramp
+- Windows 10 或 Windows 11
+- Windows PowerShell 5.1 或更高版本
+- 基础 ICC/ICM 文件中已经存在 `vcgt` 标签
+- 校色软件会通过 Windows 对应显示器的 Gamma Ramp 应用预览效果
 
-## Compatibility
+## 兼容性
 
-The project is not tied to a particular vendor. It can work with any application that exposes its preview through the standard Windows display gamma-ramp path.
+项目不限定任何校色品牌。只要软件通过 Windows 标准显示 Gamma Ramp 路径应用预览，就有可能被捕获。
 
-A confirmed use case is Datacolor SpyderTune: when the preview is correct but its adjusted profile cannot be saved, Display Calibration Saver can preserve the previewed result.
+已确认的适用场景包括 Datacolor SpyderTune：当预览效果正确、但调整后的配置文件无法保存时，可以用本工具保留当前结果。
 
-Other calibration tools and profile loaders may also work. The easiest practical test is whether the adjustment changes the whole desktop on the selected display rather than only one application window.
+其他校色工具和配置加载器也可能适用。一个直观的判断方法是：调整后，目标显示器上的整个桌面是否同步变化，而不是只有软件自己的预览窗口变化。
 
-## What it cannot capture
+## 无法捕获的效果
 
-Display Calibration Saver does not record every visible color transformation. It cannot directly preserve adjustments that exist only in:
+它不能保存所有肉眼可见的色彩变化，例如：
 
-- An application's own preview window, shader, or rendering pipeline
-- A game's filter or post-processing layer
-- A monitor's hardware controls or internal LUT
-- A separate 3D LUT pipeline
-- Some HDR and advanced-color paths
-- Driver overlays that bypass the standard Windows gamma ramp
+- 只存在于某个应用窗口、着色器或渲染管线中的调整
+- 游戏内部滤镜或后期处理
+- 显示器菜单直接修改的硬件参数或内部 LUT
+- 独立的 3D LUT 管线
+- 部分 HDR 与高级色彩管理路径
+- 绕过标准 Windows Gamma Ramp 的驱动叠加效果
 
-## How it works
+## 工作原理
 
-During a compatible preview, the calibration application writes three 256-entry, 16-bit channel tables to the selected display's video LUT. The utility reads those active values through the Windows GDI `GetDeviceGammaRamp` API and writes the exact table into the source profile's `vcgt` tag.
+兼容软件进行预览时，会把三条“每通道 256 个节点、16-bit 精度”的曲线写入目标显示器的 Video LUT。工具通过 Windows GDI 的 `GetDeviceGammaRamp` 接口读取当前数值，再把完整表格写入基础配置文件的 `vcgt` 标签。
 
-The generated profile keeps the source profile's characterization data. Only the display-calibration table is replaced. See [Technical details](docs/TECHNICAL.md) for the file-layout and validation rules.
+生成文件会保留基础配置文件原有的显示器特性描述，只替换显示校准表。文件结构和校验规则见[技术说明](docs/TECHNICAL.md)。
 
-## Important limitations
+## 重要限制
 
-- The source profile must already contain a `vcgt` tag.
-- In version 1.0, `vcgt` must be the final profile data block so it can be expanded without relocating unrelated tags.
-- Capturing a calibration curve does not create a new measurement-based characterization of the display.
-- The generated profile remains valid only for the display state and hardware settings used by the source profile.
-- The tool cannot verify visual accuracy without a measuring instrument.
+- 基础配置文件必须已经含有 `vcgt` 标签。
+- 1.0 版本要求 `vcgt` 是配置文件中的最后一个数据块，才能在不移动其他标签的情况下安全扩展。
+- 捕获校准曲线不会重新测量或重新描述显示器的色域、原生白点等特性。
+- 生成文件只适用于基础配置文件创建时对应的显示器状态和硬件设置。
+- 没有测量仪器时，工具无法验证最终画面的客观准确性。
 
-## Troubleshooting
+## 故障排查
 
-Common failure cases, multi-monitor notes, HDR limitations, and profile-format errors are covered in [Troubleshooting](docs/TROUBLESHOOTING.md).
+常见报错、多显示器问题、HDR 限制以及配置文件格式问题见[故障排查](docs/TROUBLESHOOTING.md)。
 
-## Privacy and security
+## 隐私与安全
 
-Everything runs locally. The project makes no network requests, uploads no profiles, collects no telemetry, and requests no elevation. The complete PowerShell source is included in every release.
+工具完全在本地运行，不联网、不上传配置文件、不收集遥测数据，也不申请管理员权限。每个发布包都包含完整 PowerShell 源代码。
 
-Security reports are covered by [SECURITY.md](SECURITY.md).
 
-## Contributing
+## 声明
 
-Bug reports, reproducible compatibility findings, documentation improvements, and carefully scoped patches are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Display Calibration Saver 是独立开发的非官方工具，与 Datacolor、Microsoft 或其他校色软硬件厂商没有隶属、授权或合作关系。
 
-## Disclaimer
+## 许可证
 
-Display Calibration Saver is an independent utility and is not affiliated with or endorsed by Datacolor, Microsoft, or any other calibration-software or hardware vendor.
-
-## License
-
-Released under the [MIT License](LICENSE).
+项目使用 [MIT License](LICENSE)。
