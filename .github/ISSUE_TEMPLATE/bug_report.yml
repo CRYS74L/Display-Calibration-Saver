@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible capture, profile, or display-selection problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload private ICC profiles or screenshots containing personal paths or display serial numbers.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 25H2"
+    validations:
+      required: true
+  - type: input
+    id: software
+    attributes:
+      label: Calibration software
+      description: Which application produced the preview being captured?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Select profile...
+        2. Select display...
+        3. Enable preview...
+        4. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Exact output or error message
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The adjustment changed the whole selected display, not only one application window.
+          required: true
+        - label: I removed private metadata from anything attached to this issue.
+          required: true

@@ -1,0 +1,61 @@
+name: PowerShell validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Parse PowerShell source
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.\Save-Display-Calibration.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List * -Force
+            throw "PowerShell syntax validation failed."
+          }
+
+      - name: Verify launcher target
+        shell: powershell
+        run: |
+          $launcher = Get-Content -Raw '.\Run.cmd'
+          if ($launcher -notmatch 'Save-Display-Calibration\.ps1') {
+            throw "Run.cmd does not launch the expected script."
+          }
+
+      - name: Check release package contents
+        shell: powershell
+        run: |
+          $archive = '.\dist\Display-Calibration-Saver-v1.0.0.zip'
+          if (-not (Test-Path $archive)) {
+            throw "Release package is missing."
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive))
+          try {
+            $names = $zip.Entries.FullName
+            foreach ($required in @('Run.cmd', 'Save-Display-Calibration.ps1', 'LICENSE', 'README.md', 'README.zh-CN.md')) {
+              if ($required -notin $names) {
+                throw "Release package is missing $required."
+              }
+            }
+          }
+          finally {
+            $zip.Dispose()
+          }

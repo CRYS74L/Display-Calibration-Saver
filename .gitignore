@@ -1,0 +1,9 @@
+*.icc
+*.icm
+!examples/*.icc
+!examples/*.icm
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
